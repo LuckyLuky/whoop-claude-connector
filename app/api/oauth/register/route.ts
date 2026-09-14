@@ -1,4 +1,5 @@
 import { randomToken } from '@/lib/crypto';
+import { redirectUriTrusted } from '@/lib/oauth/clients';
 import { db } from '@/lib/supabase';
 
 export const runtime = 'nodejs';
@@ -13,8 +14,9 @@ export const dynamic = 'force-dynamic';
  * Inspector.
  *
  * Registration is open, which is the norm for MCP servers: holding a client_id
- * grants nothing on its own, since every grant still requires the WHOOP account
- * holder to complete a consent screen.
+ * grants nothing on its own. What makes that safe is the redirect URI
+ * allowlist — codes only ever go back to Claude, never to a URI a stranger
+ * registered.
  */
 export async function POST(request: Request): Promise<Response> {
   let metadata: {
@@ -43,6 +45,19 @@ export async function POST(request: Request): Promise<Response> {
       {
         error: 'invalid_redirect_uri',
         error_description: 'redirect_uris must be a non-empty array.',
+      },
+      { status: 400 },
+    );
+  }
+
+  const untrusted = redirectUris.filter(
+    (uri) => typeof uri !== 'string' || !redirectUriTrusted(uri),
+  );
+  if (untrusted.length > 0) {
+    return Response.json(
+      {
+        error: 'invalid_redirect_uri',
+        error_description: `This connector only accepts Claude's redirect URIs. Rejected: ${untrusted.join(', ')}`,
       },
       { status: 400 },
     );

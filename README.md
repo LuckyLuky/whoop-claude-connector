@@ -109,6 +109,10 @@ openssl rand -base64 32   # -> TOKEN_ENCRYPTION_KEY
 `APP_BASE_URL` must be the public HTTPS origin with no trailing slash, and must
 match what you type into Claude. Set the same variables in the Vercel project.
 
+`ALLOWED_WHOOP_USER_ID` locks the connector to your WHOOP account. You don't
+need to know it up front: leave it empty, connect once, and the sign-in page
+refuses the account and shows the id to set. Redeploy and connect again.
+
 ### 4. Deploy
 
 ```bash
@@ -174,6 +178,11 @@ curl -si $BASE/mcp \
   and a `401` from the API forces one retry with a fresh token.
 - **Rate limits** are 100 req/min and 10,000 req/day per app. A `429` surfaces
   as a tool error naming the reset window rather than being retried in a loop.
+- **Codes only go to Claude.** `/authorize` and `/register` accept only
+  `https://claude.ai/api/mcp/auth_callback`, `https://claude.com/api/mcp/auth_callback`
+  and loopback redirect URIs. Open registration plus arbitrary redirect URIs
+  would let anyone phish a code for your data through WHOOP's real consent
+  screen.
 - **Infrastructure failures are never reported as `invalid_grant`.** Claude
   treats that code as "this refresh token is dead" and would discard a working
   one, forcing a needless reconnect. `/token` returns `server_error` instead.

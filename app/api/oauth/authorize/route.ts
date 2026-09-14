@@ -1,4 +1,8 @@
-import { redirectUriAllowed, resolveClient } from '@/lib/oauth/clients';
+import {
+  redirectUriAllowed,
+  redirectUriTrusted,
+  resolveClient,
+} from '@/lib/oauth/clients';
 import { createPendingAuthorization } from '@/lib/oauth/store';
 import { whoopAuthorizeUrl } from '@/lib/whoop/oauth';
 
@@ -80,6 +84,15 @@ async function authorize(request: Request): Promise<Response> {
     return errorPage(
       'Invalid redirect URI',
       'The supplied redirect_uri is not registered for this client.',
+    );
+  }
+
+  // A client may declare any redirect URI it likes; this personal connector
+  // only hands codes to Claude. See redirectUriTrusted.
+  if (!redirectUriTrusted(redirectUri)) {
+    return errorPage(
+      'Untrusted redirect URI',
+      'This connector only completes sign-in for Claude.',
     );
   }
 

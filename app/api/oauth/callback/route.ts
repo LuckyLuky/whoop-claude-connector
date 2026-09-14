@@ -1,3 +1,4 @@
+import { env } from '@/lib/env';
 import {
   consumePendingAuthorization,
   issueAuthorizationCode,
@@ -74,8 +75,22 @@ export async function GET(request: Request): Promise<Response> {
       );
     }
     const profile = (await profileResponse.json()) as WhoopProfile;
+    const whoopUserId = String(profile.user_id);
 
-    const whoopTokenId = await saveWhoopGrant(String(profile.user_id), tokens);
+    // Single-user connector: the WHOOP tokens of any other account are
+    // discarded here, before anything is stored or a code is issued.
+    const allowedUserId = env.allowedWhoopUserId();
+    if (whoopUserId !== allowedUserId) {
+      return errorPage(
+        'WHOOP account not allowed',
+        allowedUserId
+          ? 'This connector is locked to a different WHOOP account.'
+          : `ALLOWED_WHOOP_USER_ID is not set. If this is your account, set ALLOWED_WHOOP_USER_ID=${whoopUserId} in the deployment environment, redeploy, and connect again.`,
+        403,
+      );
+    }
+
+    const whoopTokenId = await saveWhoopGrant(whoopUserId, tokens);
 
     const authorizationCode = await issueAuthorizationCode({
       clientId: pending.client_id,

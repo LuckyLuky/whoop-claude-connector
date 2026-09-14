@@ -98,6 +98,29 @@ function isLoopback(url: URL): boolean {
 }
 
 /**
+ * The only places this server will ever send an authorization code.
+ *
+ * Registration is open, so without this list anyone could register their own
+ * redirect URI, send the WHOOP account holder an /authorize link, and collect a
+ * code for their data once the holder approves WHOOP's genuine consent screen.
+ * Loopback stays allowed for Claude Code and the MCP Inspector: a code sent to
+ * localhost lands on the approving user's own machine.
+ */
+const CLAUDE_REDIRECT_URIS = [
+  'https://claude.ai/api/mcp/auth_callback',
+  'https://claude.com/api/mcp/auth_callback',
+];
+
+export function redirectUriTrusted(candidate: string): boolean {
+  if (CLAUDE_REDIRECT_URIS.includes(candidate)) return true;
+  try {
+    return isLoopback(new URL(candidate));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Redirect URI comparison.
  *
  * Exact match, except for loopback addresses: native clients (Claude Code)

@@ -13,6 +13,10 @@ export default function Home() {
     { label: 'APP_BASE_URL', ok: Boolean(process.env.APP_BASE_URL) },
     { label: 'WHOOP_CLIENT_ID', ok: Boolean(process.env.WHOOP_CLIENT_ID) },
     { label: 'WHOOP_CLIENT_SECRET', ok: Boolean(process.env.WHOOP_CLIENT_SECRET) },
+    {
+      label: 'ALLOWED_WHOOP_USER_ID',
+      ok: Boolean(process.env.ALLOWED_WHOOP_USER_ID),
+    },
     { label: 'SUPABASE_URL', ok: Boolean(process.env.SUPABASE_URL) },
     {
       label: 'SUPABASE_SERVICE_ROLE_KEY',

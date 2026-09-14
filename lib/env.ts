@@ -33,6 +33,8 @@ export const env = {
   whoopClientId: () => required('WHOOP_CLIENT_ID'),
   whoopClientSecret: () => required('WHOOP_CLIENT_SECRET'),
   whoopWebhookSecret: () => process.env.WHOOP_WEBHOOK_SECRET ?? '',
+  /** Empty means no account is allowed yet; /callback explains how to set it. */
+  allowedWhoopUserId: () => process.env.ALLOWED_WHOOP_USER_ID?.trim() ?? '',
   supabaseUrl: () => required('SUPABASE_URL'),
   supabaseServiceRoleKey: () => required('SUPABASE_SERVICE_ROLE_KEY'),
   tokenEncryptionKey: () => required('TOKEN_ENCRYPTION_KEY'),
