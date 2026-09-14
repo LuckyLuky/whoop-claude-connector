@@ -23,7 +23,7 @@ export class WhoopClient {
   private async request<T>(
     path: string,
     params: Record<string, string | number | undefined> = {},
-    retryOnUnauthorized = true,
+    rejectedToken?: string,
   ): Promise<T> {
     const url = new URL(`${WHOOP_API_BASE}${path}`);
     for (const [key, value] of Object.entries(params)) {
@@ -31,7 +31,7 @@ export class WhoopClient {
     }
 
     const accessToken = await getValidAccessToken(this.whoopTokenId, {
-      force: !retryOnUnauthorized,
+      rejectedToken,
     });
 
     const response = await fetch(url, {
@@ -39,9 +39,9 @@ export class WhoopClient {
       signal: AbortSignal.timeout(20_000),
     });
 
-    if (response.status === 401 && retryOnUnauthorized) {
-      // Token was rejected despite looking fresh — force a refresh and retry once.
-      return this.request<T>(path, params, false);
+    if (response.status === 401 && rejectedToken === undefined) {
+      // Token was rejected despite looking fresh — replace it and retry once.
+      return this.request<T>(path, params, accessToken);
     }
 
     if (response.status === 429) {

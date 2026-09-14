@@ -29,6 +29,8 @@ async function postToken(body: URLSearchParams): Promise<WhoopTokenResponse> {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
+    // Must stay well under REFRESH_LEASE_SECONDS in tokens.ts.
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!response.ok) {

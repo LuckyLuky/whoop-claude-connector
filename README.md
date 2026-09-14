@@ -92,8 +92,8 @@ You need an active WHOOP membership to use the developer platform at all.
 
 ### 2. Supabase
 
-Run the migration in `supabase/migrations/0001_init.sql` against your project
-(paste it into the SQL editor, or `supabase db push`). It creates five tables,
+Run the migrations in `supabase/migrations/` in order against your project
+(paste them into the SQL editor, or `supabase db push`). It creates five tables,
 enables RLS with no policies — so only the service role key can read them — and
 adds a `prune_expired_oauth_rows()` housekeeping function.
 
@@ -173,7 +173,9 @@ curl -si $BASE/mcp \
 
 - **WHOOP rotates refresh tokens.** Every refresh returns a new one and
   invalidates the old. `lib/whoop/tokens.ts` persists the replacement before
-  handing out the new access token.
+  handing out the new access token, and only one request refreshes at a time:
+  it takes a lease on the `whoop_tokens` row (`refresh_lease_until`) while
+  parallel tool calls wait for the token it stores.
 - **WHOOP access tokens last 3600s.** They're refreshed 120s ahead of expiry,
   and a `401` from the API forces one retry with a fresh token.
 - **Rate limits** are 100 req/min and 10,000 req/day per app. A `429` surfaces

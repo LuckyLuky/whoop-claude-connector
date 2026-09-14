@@ -5,6 +5,14 @@ import { refreshWhoopTokens, type WhoopTokenResponse } from './oauth';
 /** Refresh this far ahead of expiry rather than waiting for a 401. */
 const REFRESH_SKEW_SECONDS = 120;
 
+/**
+ * How long one request may hold the refresh lease. Longer than the WHOOP
+ * token call's timeout, so a lease only lapses if its holder died mid-refresh.
+ */
+const REFRESH_LEASE_SECONDS = 30;
+const LEASE_POLL_MS = 250;
+const LEASE_WAIT_MS = 15_000;
+
 export interface WhoopGrant {
   id: string;
   whoop_user_id: string;
@@ -62,6 +70,7 @@ export async function saveWhoopGrant(
         refresh_token_enc: encrypt(tokens.refresh_token),
         expires_at: expiresAt(tokens.expires_in),
         scope: tokens.scope ?? null,
+        refresh_lease_until: null,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'whoop_user_id' },
@@ -74,52 +83,122 @@ export async function saveWhoopGrant(
 }
 
 async function loadGrant(id: string): Promise<WhoopGrant | null> {
-  const { data } = await db()
+  const { data, error } = await db()
     .from('whoop_tokens')
     .select('id, whoop_user_id, access_token_enc, refresh_token_enc, expires_at, scope')
     .eq('id', id)
     .maybeSingle();
 
+  if (error) throw new Error(`Failed to load WHOOP grant: ${error.message}`);
   return data ? decode(data as WhoopGrantRow) : null;
 }
 
+/** Fresh, and not the token WHOOP just refused. */
+function isUsable(grant: WhoopGrant, rejectedToken: string | undefined): boolean {
+  if (grant.access_token === rejectedToken) return false;
+  return (
+    new Date(grant.expires_at).getTime() - REFRESH_SKEW_SECONDS * 1000 >
+    Date.now()
+  );
+}
+
+/**
+ * Takes the refresh lease if nobody holds it or the holder's lease lapsed.
+ * A single conditional UPDATE, so at most one concurrent caller gets a row back.
+ */
+async function acquireLease(id: string): Promise<boolean> {
+  const now = new Date().toISOString();
+  const { data, error } = await db()
+    .from('whoop_tokens')
+    .update({ refresh_lease_until: expiresAt(REFRESH_LEASE_SECONDS) })
+    .eq('id', id)
+    .or(`refresh_lease_until.is.null,refresh_lease_until.lt."${now}"`)
+    .select('id');
+
+  if (error) throw new Error(`Failed to take WHOOP refresh lease: ${error.message}`);
+  return data.length > 0;
+}
+
+async function releaseLease(id: string): Promise<void> {
+  await db()
+    .from('whoop_tokens')
+    .update({ refresh_lease_until: null })
+    .eq('id', id);
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Returns a WHOOP access token that is valid right now, refreshing it first if
- * it is expired or about to be. The rotated refresh token is persisted before
- * the new access token is handed out.
+ * it is expired or about to be, or if WHOOP just refused `rejectedToken`.
+ *
+ * Only the holder of the refresh lease calls WHOOP; concurrent callers wait
+ * and reuse the token it stores. WHOOP rotates refresh tokens, so two parallel
+ * refreshes would leave one request (or the stored grant) with a dead token.
  */
 export async function getValidAccessToken(
   whoopTokenId: string,
-  options: { force?: boolean } = {},
+  options: { rejectedToken?: string } = {},
 ): Promise<string> {
-  const grant = await loadGrant(whoopTokenId);
-  if (!grant) {
-    throw new Error('WHOOP grant not found. The connector needs to be reconnected.');
+  const deadline = Date.now() + LEASE_WAIT_MS;
+
+  for (;;) {
+    const grant = await loadGrant(whoopTokenId);
+    if (!grant) {
+      throw new Error('WHOOP grant not found. The connector needs to be reconnected.');
+    }
+    if (isUsable(grant, options.rejectedToken)) return grant.access_token;
+
+    if (await acquireLease(whoopTokenId)) {
+      return refreshUnderLease(whoopTokenId, options.rejectedToken);
+    }
+
+    if (Date.now() > deadline) {
+      throw new Error('Timed out waiting for a concurrent WHOOP token refresh.');
+    }
+    await sleep(LEASE_POLL_MS);
   }
+}
 
-  const stillFresh =
-    new Date(grant.expires_at).getTime() - REFRESH_SKEW_SECONDS * 1000 >
-    Date.now();
-  if (stillFresh && !options.force) return grant.access_token;
+async function refreshUnderLease(
+  whoopTokenId: string,
+  rejectedToken: string | undefined,
+): Promise<string> {
+  try {
+    // Re-read: another request may have finished refreshing between our first
+    // read and taking the lease.
+    const grant = await loadGrant(whoopTokenId);
+    if (!grant) {
+      throw new Error('WHOOP grant not found. The connector needs to be reconnected.');
+    }
+    if (isUsable(grant, rejectedToken)) {
+      await releaseLease(whoopTokenId);
+      return grant.access_token;
+    }
 
-  const refreshed = await refreshWhoopTokens(grant.refresh_token);
+    const refreshed = await refreshWhoopTokens(grant.refresh_token);
 
-  const { error } = await db()
-    .from('whoop_tokens')
-    .update({
-      access_token_enc: encrypt(refreshed.access_token),
-      // WHOOP rotates the refresh token on every use; keep the newest one.
-      refresh_token_enc: encrypt(refreshed.refresh_token ?? grant.refresh_token),
-      expires_at: expiresAt(refreshed.expires_in),
-      scope: refreshed.scope ?? grant.scope,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', whoopTokenId);
+    const { error } = await db()
+      .from('whoop_tokens')
+      .update({
+        access_token_enc: encrypt(refreshed.access_token),
+        // WHOOP rotates the refresh token on every use; keep the newest one.
+        refresh_token_enc: encrypt(refreshed.refresh_token ?? grant.refresh_token),
+        expires_at: expiresAt(refreshed.expires_in),
+        scope: refreshed.scope ?? grant.scope,
+        refresh_lease_until: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', whoopTokenId);
 
-  if (error) {
-    throw new Error(`Failed to persist refreshed WHOOP token: ${error.message}`);
+    if (error) {
+      throw new Error(`Failed to persist refreshed WHOOP token: ${error.message}`);
+    }
+    return refreshed.access_token;
+  } catch (error) {
+    await releaseLease(whoopTokenId).catch(() => undefined);
+    throw error;
   }
-  return refreshed.access_token;
 }
 
 export async function deleteWhoopGrant(whoopTokenId: string): Promise<void> {
