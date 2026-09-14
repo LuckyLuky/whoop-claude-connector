@@ -93,9 +93,10 @@ You need an active WHOOP membership to use the developer platform at all.
 ### 2. Supabase
 
 Run the migrations in `supabase/migrations/` in order against your project
-(paste them into the SQL editor, or `supabase db push`). It creates five tables,
-enables RLS with no policies — so only the service role key can read them — and
-adds a `prune_expired_oauth_rows()` housekeeping function.
+(paste them into the SQL editor, or `supabase db push`). They create five tables,
+enable RLS with no policies — so only the service role key can read them — and
+add a `prune_expired_oauth_rows()` housekeeping function that only the service
+role may execute.
 
 ### 3. Environment
 
