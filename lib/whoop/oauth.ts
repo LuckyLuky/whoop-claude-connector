@@ -13,6 +13,18 @@ export interface WhoopTokenResponse {
   token_type: string;
 }
 
+/** A non-2xx from WHOOP's token endpoint, with its RFC 6749 error code if any. */
+export class WhoopOAuthError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | undefined,
+  ) {
+    super(message);
+    this.name = 'WhoopOAuthError';
+  }
+}
+
 /** URL the user's browser is sent to in order to grant access to their WHOOP data. */
 export function whoopAuthorizeUrl(state: string): string {
   const url = new URL(WHOOP_AUTHORIZE_URL);
@@ -35,8 +47,16 @@ async function postToken(body: URLSearchParams): Promise<WhoopTokenResponse> {
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(
+    let code: string | undefined;
+    try {
+      code = (JSON.parse(detail) as { error?: string }).error;
+    } catch {
+      // Not JSON; leave the code unknown.
+    }
+    throw new WhoopOAuthError(
       `WHOOP token request failed (${response.status}): ${detail.slice(0, 500)}`,
+      response.status,
+      code,
     );
   }
   return (await response.json()) as WhoopTokenResponse;

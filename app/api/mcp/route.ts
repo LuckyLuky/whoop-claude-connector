@@ -3,6 +3,10 @@ import { endpoints } from '@/lib/env';
 import { buildMcpServer } from '@/lib/mcp/server';
 import { lookupAccessToken } from '@/lib/oauth/store';
 import { MCP_SCOPE } from '@/lib/oauth/metadata';
+import {
+  getValidAccessToken,
+  WhoopGrantInvalidError,
+} from '@/lib/whoop/tokens';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -113,8 +117,25 @@ async function handle(
     }
   }
 
-  if (!grant && parsedBody !== undefined && callsProtectedTool(parsedBody)) {
+  const protectedCall =
+    parsedBody !== undefined && callsProtectedTool(parsedBody);
+
+  if (protectedCall && !grant) {
     return unauthorized();
+  }
+
+  // A valid bearer is not enough: the WHOOP grant behind it may be dead. Find
+  // out here, while a 401 is still possible — inside a tool handler it could
+  // only become an error result, and Claude would never offer to reconnect.
+  // This also refreshes a stale token once, before handlers run in parallel.
+  if (protectedCall && grant) {
+    try {
+      await getValidAccessToken(grant.whoop_token_id);
+    } catch (error) {
+      if (error instanceof WhoopGrantInvalidError) return unauthorized();
+      // Transient (WHOOP or database hiccup): not a reason to re-consent. The
+      // tool handler retries and reports it as a tool error.
+    }
   }
 
   const transport = new WebStandardStreamableHTTPServerTransport({

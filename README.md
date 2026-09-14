@@ -188,6 +188,11 @@ curl -si $BASE/mcp \
 - **Infrastructure failures are never reported as `invalid_grant`.** Claude
   treats that code as "this refresh token is dead" and would discard a working
   one, forcing a needless reconnect. `/token` returns `server_error` instead.
+- **A dead WHOOP grant asks you to reconnect.** Before a `tools/call` runs,
+  the MCP route checks the WHOOP grant behind the bearer. If WHOOP answers a
+  refresh with `invalid_grant`, the grant and its bearer tokens are deleted and
+  the call gets a `401`, so Claude shows the Connect card instead of a failed
+  tool call. Timeouts and WHOOP 5xx never delete anything.
 - **Revoking access:** delete the row from `whoop_tokens` (tokens cascade), and
   call `DELETE /v2/user/access` on the WHOOP API to drop the grant upstream.
 - **Housekeeping:** schedule `select prune_expired_oauth_rows();` (pg_cron or a

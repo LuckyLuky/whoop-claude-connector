@@ -1,6 +1,10 @@
 import { decrypt, encrypt } from '../crypto';
 import { db } from '../supabase';
-import { refreshWhoopTokens, type WhoopTokenResponse } from './oauth';
+import {
+  refreshWhoopTokens,
+  WhoopOAuthError,
+  type WhoopTokenResponse,
+} from './oauth';
 
 /** Refresh this far ahead of expiry rather than waiting for a 401. */
 const REFRESH_SKEW_SECONDS = 120;
@@ -12,6 +16,18 @@ const REFRESH_SKEW_SECONDS = 120;
 const REFRESH_LEASE_SECONDS = 30;
 const LEASE_POLL_MS = 250;
 const LEASE_WAIT_MS = 15_000;
+
+/**
+ * The WHOOP grant is gone for good: missing, or its refresh token was refused.
+ * Only a fresh sign-in fixes this, so the MCP route answers it with a 401.
+ * Anything else thrown from here (network, WHOOP 5xx, database) is transient.
+ */
+export class WhoopGrantInvalidError extends Error {
+  constructor(message = 'WHOOP access expired or was revoked. Reconnect the WHOOP connector.') {
+    super(message);
+    this.name = 'WhoopGrantInvalidError';
+  }
+}
 
 export interface WhoopGrant {
   id: string;
@@ -144,9 +160,7 @@ export async function getValidAccessToken(
 
   for (;;) {
     const grant = await loadGrant(whoopTokenId);
-    if (!grant) {
-      throw new Error('WHOOP grant not found. The connector needs to be reconnected.');
-    }
+    if (!grant) throw new WhoopGrantInvalidError();
     if (isUsable(grant, options.rejectedToken)) return grant.access_token;
 
     if (await acquireLease(whoopTokenId)) {
@@ -168,15 +182,26 @@ async function refreshUnderLease(
     // Re-read: another request may have finished refreshing between our first
     // read and taking the lease.
     const grant = await loadGrant(whoopTokenId);
-    if (!grant) {
-      throw new Error('WHOOP grant not found. The connector needs to be reconnected.');
-    }
+    if (!grant) throw new WhoopGrantInvalidError();
     if (isUsable(grant, rejectedToken)) {
       await releaseLease(whoopTokenId);
       return grant.access_token;
     }
 
-    const refreshed = await refreshWhoopTokens(grant.refresh_token);
+    let refreshed: WhoopTokenResponse;
+    try {
+      refreshed = await refreshWhoopTokens(grant.refresh_token);
+    } catch (error) {
+      // Only WHOOP's explicit verdict on the token counts. A timeout or 5xx
+      // must not destroy a grant that may still be perfectly good.
+      if (error instanceof WhoopOAuthError && error.code === 'invalid_grant') {
+        // Cascades to the bearer tokens Claude holds, so its next request gets
+        // a 401, its refresh gets invalid_grant, and it asks to reconnect.
+        await deleteWhoopGrant(whoopTokenId);
+        throw new WhoopGrantInvalidError();
+      }
+      throw error;
+    }
 
     const { error } = await db()
       .from('whoop_tokens')
@@ -202,5 +227,6 @@ async function refreshUnderLease(
 }
 
 export async function deleteWhoopGrant(whoopTokenId: string): Promise<void> {
-  await db().from('whoop_tokens').delete().eq('id', whoopTokenId);
+  const { error } = await db().from('whoop_tokens').delete().eq('id', whoopTokenId);
+  if (error) throw new Error(`Failed to delete WHOOP grant: ${error.message}`);
 }
