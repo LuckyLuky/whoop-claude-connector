@@ -122,6 +122,10 @@ npm run build
 vercel deploy --prod
 ```
 
+`vercel.json` pins functions to `fra1` (Frankfurt) to sit next to the Supabase
+project; move both together if you relocate either, since every tool call makes
+several round trips to the database.
+
 Claude reaches connectors from Anthropic's infrastructure, so `localhost` will
 not work. For local development, expose the dev server with a tunnel and set
 `APP_BASE_URL` to the tunnel URL:

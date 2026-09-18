@@ -10,6 +10,12 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+/**
+ * A tool call can wait on another request's WHOOP token refresh (up to 15s in
+ * lib/whoop/tokens.ts) before its own WHOOP requests even start, which is more
+ * than the default budget on Vercel's Hobby plan.
+ */
+export const maxDuration = 60;
 
 /**
  * Every tool on this server touches the user's WHOOP account, so all of them
