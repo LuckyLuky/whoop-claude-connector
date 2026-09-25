@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Claude Code worktrees are separate checkouts with their own build
+    // output. Flat config doesn't read .gitignore, and ".next/**" only
+    // matches the top level, so their .next/ would be linted as source.
+    ".claude/**",
   ]),
 ]);
 
