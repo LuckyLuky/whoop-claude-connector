@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push supersedes the run already in flight for the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned through .nvmrc: `npm test` is `node --test` over the .ts files
+      # themselves, so the runner's Node has to be new enough to strip types
+      # without a build step.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # The route type helpers (LayoutProps, RouteContext, ...) are generated,
+      # not shipped. A fresh checkout has no .next/, so `tsc` fails on
+      # app/layout.tsx unless Next has written them first.
+      - run: npx next typegen
+
+      # Cheapest checks first; the build is the slowest and shouldn't gate the
+      # others. No env block anywhere: lib/env.ts reads every variable lazily
+      # so a build needs no production secrets.
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

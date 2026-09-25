@@ -23,6 +23,9 @@ next-env.d.ts
 supabase/.temp/
 supabase/.branches/
 
+# claude code worktrees — separate checkouts, not repository content
+/.claude/worktrees/
+
 # misc
 .DS_Store
 *.pem
