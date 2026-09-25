@@ -5,7 +5,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from 'node:crypto';
-import { env } from './env';
+import { env } from './env.ts';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_BYTES = 12;

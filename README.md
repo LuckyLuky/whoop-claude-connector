@@ -213,6 +213,5 @@ curl -si $BASE/mcp \
   logs; it doesn't persist anything. Wire it to a cache table if you want a
   warm local copy or a scheduled digest.
 - Derived trend tools (rolling 7/30-day recovery and strain averages).
-- Tests for token rotation in `lib/whoop/tokens.ts` — the refresh lease and the
-  invalid_grant path are covered only by production so far. `lib/dates.ts` has
-  tests (`npm test`).
+- Wider test coverage. `lib/dates.ts` and `lib/whoop/tokens.ts` have tests
+  (`npm test`); the OAuth bridge routes do not.

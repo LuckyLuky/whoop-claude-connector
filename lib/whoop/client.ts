@@ -1,14 +1,15 @@
-import { WHOOP_API_BASE, WHOOP_MAX_PAGE_SIZE } from './constants';
-import { getValidAccessToken } from './tokens';
+import { WHOOP_API_BASE, WHOOP_MAX_PAGE_SIZE } from './constants.ts';
+import { getValidAccessToken } from './tokens.ts';
 
 export class WhoopApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly retryAfterSeconds?: number,
-  ) {
+  readonly status: number;
+  readonly retryAfterSeconds: number | undefined;
+
+  constructor(message: string, status: number, retryAfterSeconds?: number) {
     super(message);
     this.name = 'WhoopApiError';
+    this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -18,7 +19,11 @@ interface PagedResponse<T> {
 }
 
 export class WhoopClient {
-  constructor(private readonly whoopTokenId: string) {}
+  private readonly whoopTokenId: string;
+
+  constructor(whoopTokenId: string) {
+    this.whoopTokenId = whoopTokenId;
+  }
 
   private async request<T>(
     path: string,

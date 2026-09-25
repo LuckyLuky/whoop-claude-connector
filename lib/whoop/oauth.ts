@@ -1,9 +1,9 @@
-import { env, endpoints } from '../env';
+import { env, endpoints } from '../env.ts';
 import {
   WHOOP_AUTHORIZE_URL,
   WHOOP_SCOPE_STRING,
   WHOOP_TOKEN_URL,
-} from './constants';
+} from './constants.ts';
 
 export interface WhoopTokenResponse {
   access_token: string;
@@ -15,13 +15,16 @@ export interface WhoopTokenResponse {
 
 /** A non-2xx from WHOOP's token endpoint, with its RFC 6749 error code if any. */
 export class WhoopOAuthError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly code: string | undefined,
-  ) {
+  // Plain fields, not parameter properties: `node --test` strips types rather
+  // than compiling them, and parameter properties need a real compiler.
+  readonly status: number;
+  readonly code: string | undefined;
+
+  constructor(message: string, status: number, code: string | undefined) {
     super(message);
     this.name = 'WhoopOAuthError';
+    this.status = status;
+    this.code = code;
   }
 }
 

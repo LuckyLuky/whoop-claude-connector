@@ -68,10 +68,19 @@ npm run lint
 npm test
 ```
 
-`npm test` is `node --test`: Node runs the `.ts` test files directly, so there
-is no test framework and no build step. Only `lib/dates.ts` is covered so far.
-`lib/whoop/tokens.ts` (refresh rotation under the lease) is the next thing
-worth covering.
+`npm test` is `node --test`: Node runs the `.ts` files directly, so there is no
+test framework and no build step. Two consequences for any file reachable from
+a test — `lib/dates.ts`, `lib/whoop/*`:
+
+- **Relative imports need the `.ts` extension.** Node resolves ESM literally;
+  the bundler is fine either way.
+- **No parameter properties** (`constructor(private readonly x: T)`). Node
+  strips types, it does not compile them. Declare the field and assign it.
+
+`lib/whoop/tokens.ts` splits the refresh *policy* from storage
+(`grant-store.ts`) so the lease and rotation can be tested against an in-memory
+store; `createTokenService()` takes the seams, and the module's named exports
+are the production instance.
 
 A date test that still passes when you break `lib/dates.ts` is not a test:
 single-pass offset lookups only go wrong in far-east zones, which is why
