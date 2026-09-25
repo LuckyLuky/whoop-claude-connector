@@ -83,6 +83,7 @@ export interface Windows<T> {
 export function splitByDate<T extends { date?: string }>(
   records: T[],
   cutoff: string,
+  previousStart?: string,
 ): Windows<T> {
   const current: T[] = [];
   const previous: T[] = [];
@@ -90,7 +91,9 @@ export function splitByDate<T extends { date?: string }>(
   for (const record of records) {
     if (!record.date) continue;
     if (record.date >= cutoff) current.push(record);
-    else previous.push(record);
+    else if (previousStart === undefined || record.date >= previousStart) {
+      previous.push(record);
+    }
   }
 
   return { current, previous };
@@ -168,12 +171,25 @@ export interface CyclePoint {
   calories_kcal?: number;
 }
 
+/**
+ * The training load ratio is fixed at 7 days against 28 — the spans the
+ * acute:chronic workload ratio is defined and validated for. It is deliberately
+ * independent of the comparison window, so asking for a 3-day trend doesn't
+ * silently redefine what "chronic" means.
+ */
+export const ACUTE_DAYS = 7;
+export const CHRONIC_DAYS = 28;
+
 export interface TrendsInput {
   windowDays: number;
   /** First local day of the current window, YYYY-MM-DD. */
   cutoff: string;
-  /** First local day of the acute (recent-load) window, YYYY-MM-DD. */
-  acuteCutoff: string;
+  /** First local day of the preceding comparison window. */
+  previousStart: string;
+  /** First local day of the 7-day acute load window. */
+  acuteStart: string;
+  /** First local day of the 28-day chronic baseline. */
+  chronicStart: string;
   recoveries: RecoveryPoint[];
   sleeps: SleepPoint[];
   cycles: CyclePoint[];
@@ -196,19 +212,25 @@ function comparison<T extends { score_state?: string }>(
  * training load sits against the longer baseline.
  */
 export function buildTrends(input: TrendsInput) {
-  const recoveries = splitByDate(input.recoveries, input.cutoff);
-  const sleeps = splitByDate(input.sleeps, input.cutoff);
-  const cycles = splitByDate(input.cycles, input.cutoff);
+  const recoveries = splitByDate(input.recoveries, input.cutoff, input.previousStart);
+  const sleeps = splitByDate(input.sleeps, input.cutoff, input.previousStart);
+  // Cycles are fetched over the longer of the comparison span and the 28-day
+  // baseline, so the previous window needs its lower bound enforced here.
+  const cycles = splitByDate(input.cycles, input.cutoff, input.previousStart);
 
   // Naps are real sleep but not comparable with a night, and WHOOP flags them.
   const isNight = (sleep: SleepPoint) => sleep.is_nap !== true;
   const isCalibrated = (recovery: RecoveryPoint) => recovery.calibrating !== true;
 
+  const strain = (cycle: CyclePoint) => cycle.day_strain;
   const acuteStrain = scoredValues(
-    splitByDate(input.cycles, input.acuteCutoff).current,
-    (cycle) => cycle.day_strain,
+    splitByDate(input.cycles, input.acuteStart).current,
+    strain,
   );
-  const chronicStrain = scoredValues(input.cycles, (cycle) => cycle.day_strain);
+  const chronicStrain = scoredValues(
+    splitByDate(input.cycles, input.chronicStart).current,
+    strain,
+  );
 
   const acute = summarize(acuteStrain);
   const chronic = summarize(chronicStrain);
@@ -240,9 +262,9 @@ export function buildTrends(input: TrendsInput) {
       calories_kcal: comparison(cycles, (c) => c.calories_kcal),
     },
     training_load: {
-      acute_days: input.windowDays,
+      acute_days: ACUTE_DAYS,
       acute_mean: acute?.mean ?? null,
-      chronic_days: input.windowDays * 2,
+      chronic_days: CHRONIC_DAYS,
       chronic_mean: chronic?.mean ?? null,
       ratio: acuteChronicRatio(acute?.mean ?? null, chronic?.mean ?? null),
     },

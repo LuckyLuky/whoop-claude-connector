@@ -60,7 +60,7 @@ inline **Connect** card instead of a failed tool call.
 | Tool | What it returns |
 |---|---|
 | `get_daily_summary` | One day's cycle, recovery and sleep in a single call. Start here. |
-| `get_trends` | Rolling averages over N days vs the N before: recovery, HRV, RHR, sleep, strain, and the acute:chronic load ratio |
+| `get_trends` | Rolling averages over N days vs the N before: recovery, HRV, RHR, sleep, strain, plus the 7-day:28-day training load ratio |
 | `get_recovery` | Recovery %, resting HR, HRV (RMSSD), SpO2, skin temperature |
 | `get_sleep` | Time in bed, light/deep/REM split, performance, efficiency, sleep debt |
 | `get_strain` | Day strain (0–21), calories, average/max HR |
@@ -72,7 +72,10 @@ normalized: durations in minutes, energy in kilocalories, distances in meters,
 and WHOOP's nested `score` objects flattened.
 
 `get_trends` takes `window_days` (3-30, default 7) instead, and fetches twice
-that span so the window has a baseline to be compared against. Naps are left
+that span so the window has a baseline to be compared against. The training
+load ratio is separate from that window: it is always the last 7 days of day
+strain over the last 28, the spans the acute:chronic ratio is defined for, so
+cycles are fetched over 28 days even when the window is shorter. Naps are left
 out of the sleep averages, and records WHOOP has not scored — or recoveries
 taken while the strap was still calibrating — are left out of every average.
 
