@@ -1,8 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { env } from '../env';
-import { resolveRange, todayIn } from '../dates';
+import { addDays, dayRange, resolveRange, todayIn } from '../dates';
 import { WhoopClient, WhoopApiError } from '../whoop/client';
+import { buildTrends } from '../whoop/trends.ts';
 import {
   normalizeCycle,
   normalizeProfile,
@@ -213,6 +214,67 @@ export function buildMcpServer(whoopTokenId: string): McpServer {
             .catch(() => undefined),
         ]);
         return jsonResult(normalizeProfile(profile, body));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    'get_trends',
+    {
+      title: 'Get trends',
+      description:
+        'Rolling averages and how they are moving: recovery, HRV, resting heart rate, ' +
+        'sleep and day strain over the last N days, each compared with the N days ' +
+        'before. Also returns the acute:chronic training load ratio. Use this for ' +
+        '"how has my recovery been lately", "am I trending up", or "is today normal ' +
+        'for me" — it is one call instead of averaging a month of records by hand.',
+      inputSchema: {
+        window_days: z
+          .number()
+          .int()
+          .min(3)
+          .max(30)
+          .optional()
+          .describe('Length of the window in days. Defaults to 7. The same span again is fetched as the baseline to compare against.'),
+      },
+      annotations: READ_ONLY,
+    },
+    async (args) => {
+      try {
+        const windowDays = args.window_days ?? 7;
+        const today = todayIn(timeZone);
+        // The current window ends today, so it starts windowDays - 1 days back.
+        const cutoff = addDays(today, -(windowDays - 1));
+        const previousStart = addDays(cutoff, -windowDays);
+
+        const range = {
+          start: dayRange(previousStart, timeZone).start,
+          end: dayRange(today, timeZone).end,
+        };
+
+        // Generous caps: two windows of days, plus room for naps and for more
+        // than one sleep in a day.
+        const limit = windowDays * 4;
+        const [cycles, recoveries, sleeps] = await Promise.all([
+          whoop.collect<WhoopCycle>('/v2/cycle', range, limit),
+          whoop.collect<WhoopRecovery>('/v2/recovery', range, limit),
+          whoop.collect<WhoopSleep>('/v2/activity/sleep', range, limit),
+        ]);
+
+        return jsonResult({
+          range,
+          timezone: timeZone,
+          ...buildTrends({
+            windowDays,
+            cutoff,
+            acuteCutoff: cutoff,
+            recoveries: recoveries.map(normalizeRecovery),
+            sleeps: sleeps.map(normalizeSleep),
+            cycles: cycles.map(normalizeCycle),
+          }),
+        });
       } catch (error) {
         return errorResult(error);
       }

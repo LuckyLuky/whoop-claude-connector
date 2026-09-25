@@ -82,6 +82,17 @@ export function todayIn(timeZone: string): string {
   }).format(new Date());
 }
 
+/**
+ * Shifts a local calendar date by whole days. Pure calendar arithmetic in UTC:
+ * a 23- or 25-hour DST day must not shorten or lengthen a window.
+ */
+export function addDays(date: string, delta: number): string {
+  const [year, month, day] = parseIsoDate(date);
+  return new Date(Date.UTC(year, month - 1, day + delta))
+    .toISOString()
+    .slice(0, 10);
+}
+
 export interface RangeArgs {
   date?: string;
   start?: string;

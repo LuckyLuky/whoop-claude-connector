@@ -60,6 +60,7 @@ inline **Connect** card instead of a failed tool call.
 | Tool | What it returns |
 |---|---|
 | `get_daily_summary` | One day's cycle, recovery and sleep in a single call. Start here. |
+| `get_trends` | Rolling averages over N days vs the N before: recovery, HRV, RHR, sleep, strain, and the acute:chronic load ratio |
 | `get_recovery` | Recovery %, resting HR, HRV (RMSSD), SpO2, skin temperature |
 | `get_sleep` | Time in bed, light/deep/REM split, performance, efficiency, sleep debt |
 | `get_strain` | Day strain (0–21), calories, average/max HR |
@@ -69,6 +70,11 @@ inline **Connect** card instead of a failed tool call.
 All are marked `readOnlyHint` — nothing here writes to WHOOP. Responses are
 normalized: durations in minutes, energy in kilocalories, distances in meters,
 and WHOOP's nested `score` objects flattened.
+
+`get_trends` takes `window_days` (3-30, default 7) instead, and fetches twice
+that span so the window has a baseline to be compared against. Naps are left
+out of the sleep averages, and records WHOOP has not scored — or recoveries
+taken while the strap was still calibrating — are left out of every average.
 
 Date arguments accept `date` (`YYYY-MM-DD`, resolved in `WHOOP_TIMEZONE`),
 explicit `start`/`end` ISO-8601 instants, or `days` to look back from now.
@@ -212,6 +218,5 @@ curl -si $BASE/mcp \
 - Webhook fan-out. `app/api/webhooks/whoop/route.ts` verifies signatures and
   logs; it doesn't persist anything. Wire it to a cache table if you want a
   warm local copy or a scheduled digest.
-- Derived trend tools (rolling 7/30-day recovery and strain averages).
 - Wider test coverage. `lib/dates.ts` and `lib/whoop/tokens.ts` have tests
   (`npm test`); the OAuth bridge routes do not.
