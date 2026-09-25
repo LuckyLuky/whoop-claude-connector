@@ -200,8 +200,12 @@ curl -si $BASE/mcp \
   tool call. Timeouts and WHOOP 5xx never delete anything.
 - **Revoking access:** delete the row from `whoop_tokens` (tokens cascade), and
   call `DELETE /v2/user/access` on the WHOOP API to drop the grant upstream.
-- **Housekeeping:** schedule `select prune_expired_oauth_rows();` (pg_cron or a
-  Vercel cron job) to clear expired codes and tokens.
+- **Housekeeping runs nightly.** Migration 0004 schedules
+  `prune_expired_oauth_rows()` with pg_cron at 03:00 UTC, clearing expired
+  authorization codes, abandoned pending authorizations and expired tokens —
+  the periodic clean-up the privacy policy describes. Inspect it with
+  `select * from cron.job;` and its history with
+  `select * from cron.job_run_details order by start_time desc limit 10;`.
 
 ## Not built yet
 
@@ -209,5 +213,6 @@ curl -si $BASE/mcp \
   logs; it doesn't persist anything. Wire it to a cache table if you want a
   warm local copy or a scheduled digest.
 - Derived trend tools (rolling 7/30-day recovery and strain averages).
-- Automated tests. The date-window logic in `lib/dates.ts` and the token
-  rotation in `lib/whoop/tokens.ts` are the two places worth covering first.
+- Tests for token rotation in `lib/whoop/tokens.ts` — the refresh lease and the
+  invalid_grant path are covered only by production so far. `lib/dates.ts` has
+  tests (`npm test`).

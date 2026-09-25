@@ -65,7 +65,14 @@ Add a route under `app/api/` and map it in `next.config.ts`.
 npx tsc --noEmit
 npm run build
 npm run lint
+npm test
 ```
 
-There is no test suite yet. `lib/dates.ts` (DST-correct local-day windows) and
-`lib/whoop/tokens.ts` (refresh rotation) are the first things worth covering.
+`npm test` is `node --test`: Node runs the `.ts` test files directly, so there
+is no test framework and no build step. Only `lib/dates.ts` is covered so far.
+`lib/whoop/tokens.ts` (refresh rotation under the lease) is the next thing
+worth covering.
+
+A date test that still passes when you break `lib/dates.ts` is not a test:
+single-pass offset lookups only go wrong in far-east zones, which is why
+`Pacific/Auckland` is in there.
