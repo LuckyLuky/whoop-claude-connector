@@ -180,6 +180,33 @@ curl -si $BASE/mcp \
 
 ---
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`,
+in this order:
+
+```bash
+npm ci
+npx next typegen   # writes the route type helpers that tsc needs
+npx tsc --noEmit
+npm run lint
+npm test
+npm run build
+```
+
+No repository secrets are configured and none are needed: `lib/env.ts` reads
+every variable lazily, so `next build` succeeds without production
+credentials. The Node version comes from `.nvmrc` — `npm test` runs the `.ts`
+files directly, so the runner's Node has to be new enough to strip types.
+
+`next typegen` is not optional here. `LayoutProps` and the other route type
+helpers are generated into `.next/types`, which a fresh checkout does not
+have, so `tsc --noEmit` fails on `app/layout.tsx` without it.
+
+CodeRabbit reviews each pull request. `.coderabbit.yaml` carries only the
+path-specific rules — the rest it learns from `CLAUDE.md`, which it reads by
+default.
+
 ## Operational notes
 
 - **WHOOP rotates refresh tokens.** Every refresh returns a new one and
