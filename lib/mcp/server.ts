@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { env } from '../env';
 import { addDays, dayRange, resolveRange, todayIn } from '../dates';
 import { WhoopClient, WhoopApiError } from '../whoop/client';
-import { buildTrends } from '../whoop/trends.ts';
+import { ACUTE_DAYS, buildTrends, CHRONIC_DAYS } from '../whoop/trends.ts';
 import {
   normalizeCycle,
   normalizeProfile,
@@ -227,7 +227,9 @@ export function buildMcpServer(whoopTokenId: string): McpServer {
       description:
         'Rolling averages and how they are moving: recovery, HRV, resting heart rate, ' +
         'sleep and day strain over the last N days, each compared with the N days ' +
-        'before. Also returns the acute:chronic training load ratio. Use this for ' +
+        'before. Also returns the acute:chronic training load ratio — 7-day load over ' +
+        'a 28-day baseline, where around 1 means training matches what the body is ' +
+        'used to. Use this for ' +
         '"how has my recovery been lately", "am I trending up", or "is today normal ' +
         'for me" — it is one call instead of averaging a month of records by hand.',
       inputSchema: {
@@ -237,7 +239,7 @@ export function buildMcpServer(whoopTokenId: string): McpServer {
           .min(3)
           .max(30)
           .optional()
-          .describe('Length of the window in days. Defaults to 7. The same span again is fetched as the baseline to compare against.'),
+          .describe('Length of the window in days. Defaults to 7. The same span again is compared against it. The training load ratio is always 7 days over 28, regardless of this.'),
       },
       annotations: READ_ONLY,
     },
@@ -245,20 +247,36 @@ export function buildMcpServer(whoopTokenId: string): McpServer {
       try {
         const windowDays = args.window_days ?? 7;
         const today = todayIn(timeZone);
-        // The current window ends today, so it starts windowDays - 1 days back.
+        // Windows include today, so an N-day window starts N - 1 days back.
         const cutoff = addDays(today, -(windowDays - 1));
         const previousStart = addDays(cutoff, -windowDays);
+        const acuteStart = addDays(today, -(ACUTE_DAYS - 1));
+        const chronicStart = addDays(today, -(CHRONIC_DAYS - 1));
 
+        const endOfToday = dayRange(today, timeZone).end;
         const range = {
           start: dayRange(previousStart, timeZone).start,
-          end: dayRange(today, timeZone).end,
+          end: endOfToday,
+        };
+        // Cycles reach back further when the 28-day baseline outruns the
+        // comparison span, which it does for any window shorter than 14 days.
+        const cycleRange = {
+          start: dayRange(
+            chronicStart < previousStart ? chronicStart : previousStart,
+            timeZone,
+          ).start,
+          end: endOfToday,
         };
 
-        // Generous caps: two windows of days, plus room for naps and for more
+        // Generous caps: the span in days, plus room for naps and for more
         // than one sleep in a day.
         const limit = windowDays * 4;
         const [cycles, recoveries, sleeps] = await Promise.all([
-          whoop.collect<WhoopCycle>('/v2/cycle', range, limit),
+          whoop.collect<WhoopCycle>(
+            '/v2/cycle',
+            cycleRange,
+            Math.max(windowDays * 2, CHRONIC_DAYS) + 5,
+          ),
           whoop.collect<WhoopRecovery>('/v2/recovery', range, limit),
           whoop.collect<WhoopSleep>('/v2/activity/sleep', range, limit),
         ]);
@@ -269,7 +287,9 @@ export function buildMcpServer(whoopTokenId: string): McpServer {
           ...buildTrends({
             windowDays,
             cutoff,
-            acuteCutoff: cutoff,
+            previousStart,
+            acuteStart,
+            chronicStart,
             recoveries: recoveries.map(normalizeRecovery),
             sleeps: sleeps.map(normalizeSleep),
             cycles: cycles.map(normalizeCycle),

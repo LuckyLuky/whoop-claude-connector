@@ -89,6 +89,14 @@ describe('splitByDate', () => {
     assert.deepEqual(previous.map((r) => r.v), [3, 4]);
   });
 
+  it('drops records older than the previous window starts', () => {
+    // The chronic baseline needs 28 days of cycles, but the comparison window
+    // is only as long as it was asked to be — without a lower bound the
+    // "previous week" would quietly become the previous three weeks.
+    const { previous } = splitByDate(records, '2026-09-01', '2026-08-20');
+    assert.deepEqual(previous.map((r) => r.v), [3]);
+  });
+
   it('drops records WHOOP could not date', () => {
     // A record with no local date can't be placed in either window, and
     // guessing would silently skew the baseline.
@@ -170,7 +178,9 @@ describe('buildTrends', () => {
   const input = {
     windowDays: 7,
     cutoff: '2026-09-08',
-    acuteCutoff: '2026-09-08',
+    previousStart: '2026-09-01',
+    acuteStart: '2026-09-04',
+    chronicStart: '2026-08-14',
     recoveries: [
       scored('2026-09-10', { recovery_score_pct: 70, hrv_rmssd_ms: 90, resting_heart_rate_bpm: 50 }),
       scored('2026-09-09', { recovery_score_pct: 80, hrv_rmssd_ms: 100, resting_heart_rate_bpm: 48 }),
@@ -185,6 +195,8 @@ describe('buildTrends', () => {
       scored('2026-09-10', { day_strain: 14, calories_kcal: 2600 }),
       scored('2026-09-09', { day_strain: 10, calories_kcal: 2400 }),
       scored('2026-09-02', { day_strain: 8, calories_kcal: 2200 }),
+      // Older than both the comparison window and the 28-day baseline.
+      scored('2026-07-01', { day_strain: 2, calories_kcal: 1500 }),
     ],
   };
 
@@ -213,15 +225,32 @@ describe('buildTrends', () => {
     assert.equal(trends.sleep.asleep_min.current?.mean, 420);
   });
 
-  it('reports day strain and its training load ratio', () => {
+  it('reports day strain for the window', () => {
     const trends = buildTrends(input);
 
     assert.equal(trends.strain.day_strain.current?.mean, 12);
-    // Acute 7-day mean 12 over the chronic mean across all 3 days (10.67).
+    assert.equal(trends.strain.day_strain.previous?.mean, 8);
+  });
+
+  it('measures training load as 7 days against 28, whatever the window', () => {
+    // The textbook acute:chronic workload ratio. Acute = 14 and 10 (mean 12),
+    // chronic = those plus the 09-02 cycle (mean 10.7); the July cycle is
+    // outside the 28-day baseline and must not drag it down.
+    const trends = buildTrends(input);
+
+    assert.equal(trends.training_load.acute_days, 7);
+    assert.equal(trends.training_load.chronic_days, 28);
     assert.equal(trends.training_load.acute_mean, 12);
     assert.equal(trends.training_load.chronic_mean, 10.7);
     assert.equal(trends.training_load.ratio, 1.12);
-    assert.equal(trends.training_load.chronic_days, 14);
+  });
+
+  it('keeps the comparison window from swallowing the baseline fetch', () => {
+    // Cycles are fetched over 28 days so the ratio has a baseline; the
+    // "previous week" must still be one week.
+    const trends = buildTrends(input);
+
+    assert.equal(trends.strain.day_strain.previous?.n, 1);
   });
 
   it('echoes the window it was asked for', () => {
@@ -235,7 +264,9 @@ describe('buildTrends', () => {
     const trends = buildTrends({
       windowDays: 7,
       cutoff: '2026-09-08',
-      acuteCutoff: '2026-09-08',
+      previousStart: '2026-09-01',
+      acuteStart: '2026-09-04',
+      chronicStart: '2026-08-14',
       recoveries: [],
       sleeps: [],
       cycles: [],
