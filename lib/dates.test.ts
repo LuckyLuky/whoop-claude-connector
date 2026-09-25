@@ -1,6 +1,6 @@
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { dayRange, resolveRange, todayIn } from './dates.ts';
+import { addDays, dayRange, resolveRange, todayIn } from './dates.ts';
 
 /**
  * These are the windows WHOOP is actually asked for. Getting them wrong is
@@ -222,5 +222,38 @@ describe('resolveRange', () => {
 
   it('rejects a malformed date the same way dayRange does', () => {
     assert.throws(() => resolveRange({ date: '2026-9-1' }, PRAGUE), /Expected YYYY-MM-DD/);
+  });
+});
+
+describe('addDays', () => {
+  it('shifts a local calendar date forward', () => {
+    assert.equal(addDays('2026-09-10', 5), '2026-09-15');
+  });
+
+  it('shifts backward', () => {
+    assert.equal(addDays('2026-09-10', -3), '2026-09-07');
+  });
+
+  it('crosses a month boundary', () => {
+    assert.equal(addDays('2026-03-01', -1), '2026-02-28');
+  });
+
+  it('crosses a year boundary', () => {
+    assert.equal(addDays('2026-12-31', 1), '2027-01-01');
+  });
+
+  it('knows leap years', () => {
+    assert.equal(addDays('2028-02-28', 1), '2028-02-29');
+  });
+
+  it('is unaffected by DST, being calendar arithmetic', () => {
+    // 2026-03-29 is 23 hours long in Prague; the date arithmetic must not
+    // care, or a window would silently lose a day.
+    assert.equal(addDays('2026-03-28', 1), '2026-03-29');
+    assert.equal(addDays('2026-03-29', 1), '2026-03-30');
+  });
+
+  it('rejects a malformed date', () => {
+    assert.throws(() => addDays('2026-9-1', 1), /Expected YYYY-MM-DD/);
   });
 });
