@@ -98,6 +98,10 @@ export function createTokenService(options: TokenServiceOptions = {}) {
         if (delayMs === undefined) throw error;
         if (Date.now() + delayMs >= leaseUntilMs) throw error;
         await sleep(delayMs);
+        // A timer is a lower bound, not a promise: if the wake-up lands after
+        // the lease expired, another request is free to be refreshing by now
+        // and the store will not check ownership for us.
+        if (Date.now() >= leaseUntilMs) throw error;
       }
     }
   }
