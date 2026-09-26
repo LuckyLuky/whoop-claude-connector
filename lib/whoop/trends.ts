@@ -167,6 +167,8 @@ export interface SleepPoint {
 export interface CyclePoint {
   date?: string;
   score_state?: string;
+  /** WHOOP's current cycle: scored, but only as far as the day has gone. */
+  in_progress?: boolean;
   day_strain?: number;
   calories_kcal?: number;
 }
@@ -221,15 +223,21 @@ export function buildTrends(input: TrendsInput) {
   // Naps are real sleep but not comparable with a night, and WHOOP flags them.
   const isNight = (sleep: SleepPoint) => sleep.is_nap !== true;
   const isCalibrated = (recovery: RecoveryPoint) => recovery.calibrating !== true;
+  // The day in progress holds only as much strain as has happened so far.
+  // Averaging it as a whole day understates the mean and the load ratio, and
+  // the understatement shrinks as the day goes on — a moving target.
+  const isComplete = (cycle: CyclePoint) => cycle.in_progress !== true;
 
   const strain = (cycle: CyclePoint) => cycle.day_strain;
   const acuteStrain = scoredValues(
     splitByDate(input.cycles, input.acuteStart).current,
     strain,
+    isComplete,
   );
   const chronicStrain = scoredValues(
     splitByDate(input.cycles, input.chronicStart).current,
     strain,
+    isComplete,
   );
 
   const acute = summarize(acuteStrain);
@@ -258,8 +266,8 @@ export function buildTrends(input: TrendsInput) {
       sleep_debt_min: comparison(sleeps, (s) => s.sleep_debt_min, isNight),
     },
     strain: {
-      day_strain: comparison(cycles, (c) => c.day_strain),
-      calories_kcal: comparison(cycles, (c) => c.calories_kcal),
+      day_strain: comparison(cycles, (c) => c.day_strain, isComplete),
+      calories_kcal: comparison(cycles, (c) => c.calories_kcal, isComplete),
     },
     training_load: {
       acute_days: ACUTE_DAYS,

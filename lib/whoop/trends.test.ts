@@ -225,6 +225,38 @@ describe('buildTrends', () => {
     assert.equal(trends.sleep.asleep_min.current?.mean, 420);
   });
 
+  it('leaves a day still in progress out of the strain averages', () => {
+    // WHOOP scores the current cycle as it goes, so at midday it holds a
+    // partial strain. Counting it as a full day drags the mean down and
+    // makes the load ratio read low every morning.
+    const trends = buildTrends({
+      ...input,
+      cycles: [
+        { ...scored('2026-09-10', { day_strain: 1.7, calories_kcal: 400 }), in_progress: true },
+        scored('2026-09-09', { day_strain: 10, calories_kcal: 2400 }),
+      ],
+    });
+
+    assert.equal(trends.strain.day_strain.current?.n, 1);
+    assert.equal(trends.strain.day_strain.current?.mean, 10);
+    assert.equal(trends.strain.calories_kcal.current?.mean, 2400);
+  });
+
+  it('leaves a day still in progress out of the training load too', () => {
+    const trends = buildTrends({
+      ...input,
+      cycles: [
+        { ...scored('2026-09-10', { day_strain: 1.7, calories_kcal: 400 }), in_progress: true },
+        scored('2026-09-09', { day_strain: 10, calories_kcal: 2400 }),
+        scored('2026-09-02', { day_strain: 8, calories_kcal: 2200 }),
+      ],
+    });
+
+    assert.equal(trends.training_load.acute_mean, 10);
+    assert.equal(trends.training_load.chronic_mean, 9);
+    assert.equal(trends.training_load.ratio, 1.11);
+  });
+
   it('reports day strain for the window', () => {
     const trends = buildTrends(input);
 

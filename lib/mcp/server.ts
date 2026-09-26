@@ -231,7 +231,9 @@ export function buildMcpServer(whoopTokenId: string): McpServer {
         'a 28-day baseline, where around 1 means training matches what the body is ' +
         'used to. Use this for ' +
         '"how has my recovery been lately", "am I trending up", or "is today normal ' +
-        'for me" — it is one call instead of averaging a month of records by hand.',
+        'for me" — it is one call instead of averaging a month of records by hand. ' +
+        'Day strain leaves out the day still in progress, so its current window often ' +
+        'holds one fewer day than recovery and sleep do.',
       inputSchema: {
         window_days: z
           .number()
