@@ -16,6 +16,21 @@ reviews:
   path_filters:
     - '!package-lock.json'
 
+  pre_merge_checks:
+    # Docstring coverage counts every function a diff touches, test fixtures
+    # included, and the check takes no path scoping — so a PR that adds a fake
+    # Supabase client and a few row builders sits near 40% however well the
+    # production code is documented. PR #2 was flagged at 41.67% with every
+    # exported function carrying a doc comment.
+    #
+    # So this is a floor against a diff that documents nothing, not a target:
+    # 30 clears that measurement with room to spare, where the default 80 — or
+    # anything near the observed value — just fires on the next test-heavy PR.
+    # Set `mode: off` if it still cries wolf.
+    docstrings:
+      mode: warning
+      threshold: 30
+
   path_instructions:
     - path: app/api/mcp/route.ts
       instructions: >-
