@@ -359,3 +359,77 @@ describe('saveWhoopGrant', () => {
     );
   });
 });
+
+/**
+ * The narrowest window in the whole flow: WHOOP has already rotated, so the
+ * refresh token in the database is dead and its replacement exists only in
+ * memory. Dropping it here does not fail the current request — it kills the
+ * grant, and the user finds out an hour later when the access token expires.
+ */
+describe('persisting a rotated refresh token', () => {
+  function failingStore(failures: number) {
+    const store = createMemoryStore(expired);
+    const write = store.storeRefreshed.bind(store);
+    let remaining = failures;
+    const attempts = { count: 0 };
+    store.storeRefreshed = async (id, tokens) => {
+      attempts.count += 1;
+      if (remaining > 0) {
+        remaining -= 1;
+        throw new Error('could not serialize access');
+      }
+      return write(id, tokens);
+    };
+    return { store, attempts };
+  }
+
+  function serviceWithRetries(
+    store: MemoryStore,
+    refresh: (refreshToken: string) => Promise<WhoopTokenResponse>,
+  ) {
+    return createTokenService({
+      store,
+      refresh,
+      leasePollMs: 2,
+      leaseWaitMs: 200,
+      storeRetryDelaysMs: [1, 1],
+    });
+  }
+
+  it('retries a transient write and keeps the rotated token', async () => {
+    const { store, attempts } = failingStore(1);
+    const refresh = recordingRefresh(async () => whoopResponse());
+
+    const token = await serviceWithRetries(store, refresh).getValidAccessToken(GRANT_ID);
+
+    assert.equal(token, 'access-new');
+    assert.equal(attempts.count, 2);
+    // WHOOP must not be asked twice: a second refresh would rotate again and
+    // invalidate the very token being stored.
+    assert.deepEqual(refresh.seen, ['refresh-old']);
+    assert.equal(store.row()?.refreshToken, 'refresh-new');
+  });
+
+  it('gives up after the configured attempts and rethrows', async () => {
+    const { store, attempts } = failingStore(99);
+    const refresh = recordingRefresh(async () => whoopResponse());
+
+    await assert.rejects(
+      () => serviceWithRetries(store, refresh).getValidAccessToken(GRANT_ID),
+      /could not serialize access/,
+    );
+    assert.equal(attempts.count, 3);
+  });
+
+  it('releases the lease when the write cannot be persisted', async () => {
+    const { store } = failingStore(99);
+    const refresh = recordingRefresh(async () => whoopResponse());
+
+    await assert.rejects(() =>
+      serviceWithRetries(store, refresh).getValidAccessToken(GRANT_ID),
+    );
+
+    assert.equal(store.row()?.leaseUntil, null);
+    assert.ok(store.calls.release >= 1);
+  });
+});
