@@ -421,6 +421,27 @@ describe('persisting a rotated refresh token', () => {
     assert.equal(attempts.count, 3);
   });
 
+  it('does not retry a write that would outlast the lease', async () => {
+    const { store, attempts } = failingStore(99);
+    const refresh = recordingRefresh(async () => whoopResponse());
+    // A delay longer than the 30s lease: waiting it out would let another
+    // request take the lease and refresh with the token WHOOP already spent,
+    // and WHOOP answering invalid_grant deletes the grant.
+    const service = createTokenService({
+      store,
+      refresh,
+      leasePollMs: 2,
+      leaseWaitMs: 200,
+      storeRetryDelaysMs: [60_000],
+    });
+
+    const startedAt = Date.now();
+    await assert.rejects(() => service.getValidAccessToken(GRANT_ID));
+
+    assert.equal(attempts.count, 1);
+    assert.ok(Date.now() - startedAt < 5_000, 'gave up instead of sleeping past the lease');
+  });
+
   it('releases the lease when the write cannot be persisted', async () => {
     const { store } = failingStore(99);
     const refresh = recordingRefresh(async () => whoopResponse());
