@@ -1,4 +1,4 @@
-import { db } from '../supabase';
+import { db } from '../supabase.ts';
 
 /**
  * Client identification for the bridge authorization server.
@@ -40,11 +40,19 @@ async function resolveCimd(clientId: string): Promise<ResolvedClient | null> {
   }
   if (!response.ok) return null;
 
-  const doc = (await response.json()) as {
+  // A `client_id` URL is supplied by the caller, so the body behind it is
+  // hostile input. A parser error must not escape: it would surface on the
+  // sign-in page, quoting the body it choked on.
+  let doc: {
     client_id?: string;
     client_name?: string;
     redirect_uris?: string[];
   };
+  try {
+    doc = await response.json();
+  } catch {
+    return null;
+  }
 
   // The document must be self-referential: it asserts its own identity, so the
   // only thing anchoring it is that it is served from the client_id URL itself.
