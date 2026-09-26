@@ -1,4 +1,5 @@
 import { env } from '@/lib/env';
+import { errorPage as htmlErrorPage } from '@/lib/html';
 import {
   consumePendingAuthorization,
   issueAuthorizationCode,
@@ -10,13 +11,13 @@ import type { WhoopProfile } from '@/lib/whoop/normalize';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/** The shared page, plus the line that tells the user what to do next. */
 function errorPage(title: string, detail: string, status = 400): Response {
-  return new Response(
-    `<!doctype html><meta charset="utf-8"><title>${title}</title>` +
-      `<body style="font:15px/1.6 system-ui;margin:3rem auto;max-width:34rem;padding:0 1rem">` +
-      `<h1 style="font-size:1.2rem">${title}</h1><p>${detail}</p>` +
-      `<p style="color:#666">You can close this window and try connecting again.</p></body>`,
-    { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+  return htmlErrorPage(
+    title,
+    detail,
+    status,
+    'You can close this window and try connecting again.',
   );
 }
 

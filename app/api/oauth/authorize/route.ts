@@ -3,20 +3,12 @@ import {
   redirectUriTrusted,
   resolveClient,
 } from '@/lib/oauth/clients';
+import { errorPage } from '@/lib/html';
 import { createPendingAuthorization } from '@/lib/oauth/store';
 import { whoopAuthorizeUrl } from '@/lib/whoop/oauth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function errorPage(title: string, detail: string, status = 400): Response {
-  return new Response(
-    `<!doctype html><meta charset="utf-8"><title>${title}</title>` +
-      `<body style="font:15px/1.6 system-ui;margin:3rem auto;max-width:34rem;padding:0 1rem">` +
-      `<h1 style="font-size:1.2rem">${title}</h1><p>${detail}</p></body>`,
-    { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
-  );
-}
 
 function redirectWithError(
   redirectUri: string,
