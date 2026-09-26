@@ -1,5 +1,6 @@
-import { hashToken, randomToken } from '../crypto';
-import { db } from '../supabase';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { hashToken, randomToken } from '../crypto.ts';
+import { db } from '../supabase.ts';
 
 /**
  * Persistence for the bridge authorization server.
@@ -23,6 +24,26 @@ function expiry(seconds: number): string {
 
 function isExpired(timestamp: string): boolean {
   return new Date(timestamp).getTime() <= Date.now();
+}
+
+/**
+ * Unwraps a single-row result, distinguishing "no such row" from "the query
+ * did not run".
+ *
+ * Every caller here turns `null` into a refusal: an unknown bearer becomes a
+ * 401, an unknown refresh token becomes `invalid_grant`. Letting a failed
+ * query collapse into `null` would make a Supabase blip look like a revoked
+ * grant, and Claude answers `invalid_grant` by discarding a refresh token that
+ * was working. So a query error is thrown, and `/token` reports `server_error`.
+ */
+export function takeOne<T>(
+  result: { data: unknown; error: { message: string } | null },
+  what: string,
+): T | null {
+  if (result.error) {
+    throw new Error(`Failed to read ${what}: ${result.error.message}`);
+  }
+  return (result.data ?? null) as T | null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -71,19 +92,23 @@ export async function createPendingAuthorization(input: {
 
 export async function consumePendingAuthorization(
   state: string,
+  client: SupabaseClient = db(),
 ): Promise<PendingAuthorization | null> {
-  const { data } = await db()
-    .from('mcp_pending_authorizations')
-    .select('*')
-    .eq('state', state)
-    .maybeSingle();
+  // Deleted and returned in one statement, so only the caller that actually
+  // removed the row sees it. A replayed /callback finds nothing.
+  const data = takeOne<PendingAuthorization>(
+    await client
+      .from('mcp_pending_authorizations')
+      .delete()
+      .eq('state', state)
+      .select()
+      .maybeSingle(),
+    'pending authorization',
+  );
 
   if (!data) return null;
-
-  await db().from('mcp_pending_authorizations').delete().eq('state', state);
-
   if (isExpired(data.expires_at)) return null;
-  return data as PendingAuthorization;
+  return data;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -124,21 +149,30 @@ export async function issueAuthorizationCode(input: {
   return code;
 }
 
-/** Single-use: the row is deleted on first read, expired or not. */
+/**
+ * Single-use: the row is deleted on first read, expired or not.
+ *
+ * The delete is what returns the row, so of two requests redeeming the same
+ * code exactly one is served. Reading first and deleting second left a window
+ * in which both saw it.
+ */
 export async function consumeAuthorizationCode(
   code: string,
+  client: SupabaseClient = db(),
 ): Promise<AuthorizationCode | null> {
-  const { data } = await db()
-    .from('mcp_authorization_codes')
-    .select('*')
-    .eq('code', code)
-    .maybeSingle();
+  const data = takeOne<AuthorizationCode>(
+    await client
+      .from('mcp_authorization_codes')
+      .delete()
+      .eq('code', code)
+      .select()
+      .maybeSingle(),
+    'authorization code',
+  );
 
   if (!data) return null;
-  await db().from('mcp_authorization_codes').delete().eq('code', code);
-
   if (isExpired(data.expires_at)) return null;
-  return data as AuthorizationCode;
+  return data;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -151,15 +185,18 @@ export interface IssuedTokens {
   expiresIn: number;
 }
 
-export async function issueTokens(input: {
-  clientId: string;
-  whoopTokenId: string;
-  scope: string | null;
-}): Promise<IssuedTokens> {
+export async function issueTokens(
+  input: {
+    clientId: string;
+    whoopTokenId: string;
+    scope: string | null;
+  },
+  client: SupabaseClient = db(),
+): Promise<IssuedTokens> {
   const accessToken = randomToken(32);
   const refreshToken = randomToken(32);
 
-  const { error } = await db().from('mcp_access_tokens').insert({
+  const { error } = await client.from('mcp_access_tokens').insert({
     token_hash: hashToken(accessToken),
     refresh_token_hash: hashToken(refreshToken),
     client_id: input.clientId,
@@ -188,45 +225,94 @@ export interface AccessTokenRecord {
 /** Returns null for unknown or expired bearer tokens. */
 export async function lookupAccessToken(
   token: string,
+  client: SupabaseClient = db(),
 ): Promise<AccessTokenRecord | null> {
-  const { data } = await db()
-    .from('mcp_access_tokens')
-    .select('token_hash, client_id, whoop_token_id, scope, expires_at')
-    .eq('token_hash', hashToken(token))
-    .maybeSingle();
+  const data = takeOne<AccessTokenRecord>(
+    await client
+      .from('mcp_access_tokens')
+      .select('token_hash, client_id, whoop_token_id, scope, expires_at')
+      .eq('token_hash', hashToken(token))
+      .maybeSingle(),
+    'access token',
+  );
 
   if (!data) return null;
   if (isExpired(data.expires_at)) return null;
-  return data as AccessTokenRecord;
+  return data;
+}
+
+/** The columns rotation needs from the row it is replacing. */
+interface RotationSource {
+  token_hash: string;
+  client_id: string;
+  whoop_token_id: string;
+  scope: string | null;
+  refresh_expires_at: string;
 }
 
 /**
  * Rotates a refresh token, as OAuth 2.1 requires for public clients. The old
- * row is deleted in the same operation that issues the replacement.
+ * row is consumed by the statement that returns it, so of two requests
+ * presenting the same refresh token exactly one is served.
  */
 export async function rotateRefreshToken(
   refreshToken: string,
+  client: SupabaseClient = db(),
 ): Promise<{ tokens: IssuedTokens; clientId: string } | null> {
-  const { data } = await db()
-    .from('mcp_access_tokens')
-    .select('token_hash, client_id, whoop_token_id, scope, refresh_expires_at')
-    .eq('refresh_token_hash', hashToken(refreshToken))
-    .maybeSingle();
+  const refreshHash = hashToken(refreshToken);
+  const existing = takeOne<RotationSource>(
+    await client
+      .from('mcp_access_tokens')
+      .select('token_hash, client_id, whoop_token_id, scope, refresh_expires_at')
+      .eq('refresh_token_hash', refreshHash)
+      .maybeSingle(),
+    'refresh token',
+  );
 
-  if (!data) return null;
-  await db()
-    .from('mcp_access_tokens')
-    .delete()
-    .eq('token_hash', data.token_hash);
+  if (!existing) return null;
 
-  if (isExpired(data.refresh_expires_at)) return null;
+  if (isExpired(existing.refresh_expires_at)) {
+    await client
+      .from('mcp_access_tokens')
+      .delete()
+      .eq('token_hash', existing.token_hash);
+    return null;
+  }
 
-  const tokens = await issueTokens({
-    clientId: data.client_id,
-    whoopTokenId: data.whoop_token_id,
-    scope: data.scope,
-  });
-  return { tokens, clientId: data.client_id };
+  // Issue first, then consume. The other order — delete, then issue — leaves
+  // the grant with no tokens at all if issuing fails, and a reconnect is the
+  // only way back from that. This way a failure costs nothing and a lost race
+  // costs one discarded pair.
+  const tokens = await issueTokens(
+    {
+      clientId: existing.client_id,
+      whoopTokenId: existing.whoop_token_id,
+      scope: existing.scope,
+    },
+    client,
+  );
+
+  const consumed = takeOne<{ token_hash: string }>(
+    await client
+      .from('mcp_access_tokens')
+      .delete()
+      .eq('refresh_token_hash', refreshHash)
+      .select('token_hash')
+      .maybeSingle(),
+    'refresh token',
+  );
+
+  if (!consumed) {
+    // Someone else rotated this token first. Their pair is the live one, so
+    // drop ours rather than leaving two valid bearers behind.
+    await client
+      .from('mcp_access_tokens')
+      .delete()
+      .eq('token_hash', hashToken(tokens.accessToken));
+    return null;
+  }
+
+  return { tokens, clientId: existing.client_id };
 }
 
 /** Drops every token bound to a WHOOP grant. Used when access is revoked. */
