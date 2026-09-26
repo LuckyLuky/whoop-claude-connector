@@ -75,7 +75,10 @@ and WHOOP's nested `score` objects flattened.
 that span so the window has a baseline to be compared against. The training
 load ratio is separate from that window: it is always the last 7 days of day
 strain over the last 28, the spans the acute:chronic ratio is defined for, so
-cycles are fetched over 28 days even when the window is shorter. Naps are left
+cycles are fetched over 28 days even when the window is shorter. The day still
+in progress is left out of the strain and calorie averages — WHOOP scores the
+current cycle as the day goes, and counting a half-finished day as a whole one
+understates both the mean and the ratio. Naps are left
 out of the sleep averages, and records WHOOP has not scored — or recoveries
 taken while the strap was still calibrating — are left out of every average.
 
