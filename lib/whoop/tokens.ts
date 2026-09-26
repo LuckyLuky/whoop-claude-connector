@@ -77,18 +77,27 @@ export function createTokenService(options: TokenServiceOptions = {}) {
    * user finds out an hour later. So it is retried while the lease is held,
    * and if it still cannot be written the error propagates rather than the
    * caller being handed an access token whose refresh token was lost.
+   *
+   * Retries stop at the lease, never past it. Sleeping beyond `leaseUntilMs`
+   * would let another request take the lease and refresh with the token WHOOP
+   * has already spent — and WHOOP answering `invalid_grant` to that deletes
+   * the grant. The lease is the serialization boundary, so no write is
+   * attempted outside it.
    */
   async function persistRefreshed(
     whoopTokenId: string,
     tokens: RefreshedTokens,
+    leaseUntilMs: number,
   ): Promise<void> {
     for (let attempt = 0; ; attempt += 1) {
       try {
         await store.storeRefreshed(whoopTokenId, tokens);
         return;
       } catch (error) {
-        if (attempt >= storeRetryDelaysMs.length) throw error;
-        await sleep(storeRetryDelaysMs[attempt]);
+        const delayMs = storeRetryDelaysMs[attempt];
+        if (delayMs === undefined) throw error;
+        if (Date.now() + delayMs >= leaseUntilMs) throw error;
+        await sleep(delayMs);
       }
     }
   }
@@ -128,6 +137,7 @@ export function createTokenService(options: TokenServiceOptions = {}) {
   async function refreshUnderLease(
     whoopTokenId: string,
     rejectedToken: string | undefined,
+    leaseUntilMs: number,
   ): Promise<string> {
     try {
       // Re-read: another request may have finished refreshing between our
@@ -154,13 +164,17 @@ export function createTokenService(options: TokenServiceOptions = {}) {
         throw error;
       }
 
-      await persistRefreshed(whoopTokenId, {
-        accessToken: refreshed.access_token,
-        // WHOOP rotates the refresh token on every use; keep the newest one.
-        refreshToken: refreshed.refresh_token ?? grant.refreshToken,
-        expiresAt: expiresAt(refreshed.expires_in),
-        scope: refreshed.scope ?? grant.scope,
-      });
+      await persistRefreshed(
+        whoopTokenId,
+        {
+          accessToken: refreshed.access_token,
+          // WHOOP rotates the refresh token on every use; keep the newest one.
+          refreshToken: refreshed.refresh_token ?? grant.refreshToken,
+          expiresAt: expiresAt(refreshed.expires_in),
+          scope: refreshed.scope ?? grant.scope,
+        },
+        leaseUntilMs,
+      );
 
       return refreshed.access_token;
     } catch (error) {
@@ -190,13 +204,18 @@ export function createTokenService(options: TokenServiceOptions = {}) {
       if (isUsable(grant, callOptions.rejectedToken)) return grant.accessToken;
 
       const now = new Date();
+      const leaseUntilMs = now.getTime() + REFRESH_LEASE_SECONDS * 1000;
       const taken = await store.acquireLease(
         whoopTokenId,
-        new Date(now.getTime() + REFRESH_LEASE_SECONDS * 1000).toISOString(),
+        new Date(leaseUntilMs).toISOString(),
         now.toISOString(),
       );
       if (taken) {
-        return refreshUnderLease(whoopTokenId, callOptions.rejectedToken);
+        return refreshUnderLease(
+          whoopTokenId,
+          callOptions.rejectedToken,
+          leaseUntilMs,
+        );
       }
 
       if (Date.now() > deadline) {
