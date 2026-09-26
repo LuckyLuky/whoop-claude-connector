@@ -2,6 +2,7 @@ import {
   supabaseGrantStore,
   type GrantRecord,
   type GrantStore,
+  type RefreshedTokens,
 } from './grant-store.ts';
 import {
   refreshWhoopTokens,
@@ -19,6 +20,12 @@ const REFRESH_SKEW_SECONDS = 120;
 const REFRESH_LEASE_SECONDS = 30;
 const LEASE_POLL_MS = 250;
 const LEASE_WAIT_MS = 15_000;
+
+/**
+ * Backoff for persisting a rotated token set. One entry per retry, so the
+ * write is attempted three times in total, well inside the lease.
+ */
+const STORE_RETRY_DELAYS_MS = [250, 1000];
 
 /**
  * The WHOOP grant is gone for good: missing, or its refresh token was refused.
@@ -39,6 +46,7 @@ export interface TokenServiceOptions {
   refresh?: (refreshToken: string) => Promise<WhoopTokenResponse>;
   leasePollMs?: number;
   leaseWaitMs?: number;
+  storeRetryDelaysMs?: number[];
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -58,6 +66,32 @@ export function createTokenService(options: TokenServiceOptions = {}) {
   const refresh = options.refresh ?? refreshWhoopTokens;
   const leasePollMs = options.leasePollMs ?? LEASE_POLL_MS;
   const leaseWaitMs = options.leaseWaitMs ?? LEASE_WAIT_MS;
+  const storeRetryDelaysMs = options.storeRetryDelaysMs ?? STORE_RETRY_DELAYS_MS;
+
+  /**
+   * Persists a rotated token set, retrying a failed write.
+   *
+   * By the time this runs WHOOP has already rotated: the refresh token in the
+   * database is spent and its replacement exists only in memory. A transient
+   * write failure here does not fail visibly — it kills the grant, and the
+   * user finds out an hour later. So it is retried while the lease is held,
+   * and if it still cannot be written the error propagates rather than the
+   * caller being handed an access token whose refresh token was lost.
+   */
+  async function persistRefreshed(
+    whoopTokenId: string,
+    tokens: RefreshedTokens,
+  ): Promise<void> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await store.storeRefreshed(whoopTokenId, tokens);
+        return;
+      } catch (error) {
+        if (attempt >= storeRetryDelaysMs.length) throw error;
+        await sleep(storeRetryDelaysMs[attempt]);
+      }
+    }
+  }
 
   /** Fresh, and not the token WHOOP just refused. */
   function isUsable(grant: GrantRecord, rejectedToken: string | undefined): boolean {
@@ -120,7 +154,7 @@ export function createTokenService(options: TokenServiceOptions = {}) {
         throw error;
       }
 
-      await store.storeRefreshed(whoopTokenId, {
+      await persistRefreshed(whoopTokenId, {
         accessToken: refreshed.access_token,
         // WHOOP rotates the refresh token on every use; keep the newest one.
         refreshToken: refreshed.refresh_token ?? grant.refreshToken,
