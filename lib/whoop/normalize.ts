@@ -1,3 +1,5 @@
+import { localDateIn } from '../dates.ts';
+
 /**
  * WHOOP's raw payloads nest every metric under a `score` object, express
  * durations in milliseconds and energy in kilojoules, and carry a lot of
@@ -148,11 +150,18 @@ export function normalizeCycle(cycle: WhoopCycle) {
   });
 }
 
-export function normalizeRecovery(recovery: WhoopRecovery) {
+/**
+ * Recovery is the one record with no `timezone_offset` of its own, so its
+ * local day comes from `created_at` resolved in `timeZone`. Without one the
+ * UTC date is used, which is a day out either side of midnight.
+ */
+export function normalizeRecovery(recovery: WhoopRecovery, timeZone?: string) {
   return compact({
     cycle_id: recovery.cycle_id,
     sleep_id: recovery.sleep_id,
-    date: recovery.created_at?.slice(0, 10),
+    date: timeZone
+      ? localDateIn(recovery.created_at, timeZone)
+      : recovery.created_at?.slice(0, 10),
     score_state: recovery.score_state,
     calibrating: recovery.score?.user_calibrating,
     recovery_score_pct: recovery.score?.recovery_score,

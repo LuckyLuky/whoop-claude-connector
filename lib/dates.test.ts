@@ -1,6 +1,12 @@
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { addDays, dayRange, resolveRange, todayIn } from './dates.ts';
+import {
+  addDays,
+  dayRange,
+  localDateIn,
+  resolveRange,
+  todayIn,
+} from './dates.ts';
 
 /**
  * These are the windows WHOOP is actually asked for. Getting them wrong is
@@ -255,5 +261,26 @@ describe('addDays', () => {
 
   it('rejects a malformed date', () => {
     assert.throws(() => addDays('2026-9-1', 1), /Expected YYYY-MM-DD/);
+  });
+});
+
+describe('localDateIn', () => {
+  it('reads the local calendar day of an instant', () => {
+    assert.equal(localDateIn('2026-06-15T12:00:00Z', 'Europe/Prague'), '2026-06-15');
+  });
+
+  it('rolls back a day where the instant is still yesterday', () => {
+    // 00:30 UTC on 2 January is still 1 January on the US west coast; a
+    // recovery timestamped then belongs to the earlier local day.
+    assert.equal(localDateIn('2026-01-02T00:30:00Z', 'America/Los_Angeles'), '2026-01-01');
+  });
+
+  it('rolls forward a day where the instant is already tomorrow', () => {
+    assert.equal(localDateIn('2026-06-14T23:30:00Z', 'Pacific/Auckland'), '2026-06-15');
+  });
+
+  it('has no date for a missing or unparseable instant', () => {
+    assert.equal(localDateIn(undefined, 'Europe/Prague'), undefined);
+    assert.equal(localDateIn('not-a-timestamp', 'Europe/Prague'), undefined);
   });
 });

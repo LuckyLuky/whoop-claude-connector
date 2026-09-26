@@ -98,7 +98,7 @@ export function buildMcpServer(whoopTokenId: string): McpServer {
         return jsonResult({
           range,
           count: records.length,
-          recoveries: records.map(normalizeRecovery),
+          recoveries: records.map((record) => normalizeRecovery(record, timeZone)),
         });
       } catch (error) {
         return errorResult(error);
@@ -290,7 +290,7 @@ export function buildMcpServer(whoopTokenId: string): McpServer {
             previousStart,
             acuteStart,
             chronicStart,
-            recoveries: recoveries.map(normalizeRecovery),
+            recoveries: recoveries.map((record) => normalizeRecovery(record, timeZone)),
             sleeps: sleeps.map(normalizeSleep),
             cycles: cycles.map(normalizeCycle),
           }),
@@ -344,7 +344,7 @@ export function buildMcpServer(whoopTokenId: string): McpServer {
         return jsonResult({
           date,
           cycle: normalizeCycle(cycle),
-          recovery: recovery ? normalizeRecovery(recovery) : null,
+          recovery: recovery ? normalizeRecovery(recovery, timeZone) : null,
           sleep: sleep ? normalizeSleep(sleep) : null,
         });
       } catch (error) {
