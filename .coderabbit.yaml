@@ -1,0 +1,91 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+#
+# Only what differs from CodeRabbit's defaults belongs here. Checked against
+# the schema above: `profile: chill`, `request_changes_workflow: false`,
+# `poem: false`, and every linter this repo could use (eslint, actionlint,
+# zizmor, gitleaks, squawk, yamllint) are already the defaults — restating
+# them would only rot.
+#
+# The repo's landmines are documented in CLAUDE.md, which CodeRabbit reads on
+# its own: knowledge_base.code_guidelines.filePatterns defaults to
+# **/CLAUDE.md and **/AGENTS.md. What follows is the subset worth pinning to a
+# specific path, because these are the mistakes that look like a working diff
+# and break Claude's connection at runtime.
+
+reviews:
+  path_filters:
+    - '!package-lock.json'
+
+  path_instructions:
+    - path: app/api/mcp/route.ts
+      instructions: >-
+        The auth gate must produce a transport-level HTTP 401 with a
+        WWW-Authenticate header, and must run before the JSON-RPC body reaches
+        the MCP SDK. Flag any change that turns an auth failure into a 200
+        response wrapping `isError: true`: the model reads that as a failed
+        tool call, so Claude never shows a Connect card and the user cannot
+        reconnect. Once a tool handler is running its return value is already
+        destined for a 200, so an auth check cannot be moved into one.
+
+    - path: app/api/oauth/**
+      instructions: >-
+        This is the bridge between Claude's PKCE request and WHOOP's
+        confidential-client flow. Flag: (1) returning `invalid_grant` for an
+        infrastructure failure such as a timeout, a 5xx from WHOOP or a
+        database error — Claude reads that code as "this refresh token is
+        dead" and discards a working one, so infrastructure failures must be
+        `server_error`; (2) dropping the `offline` scope from the WHOOP
+        authorization request, which is what makes refresh tokens exist at
+        all; (3) body parsing that contradicts the specs — `/token` takes
+        `application/x-www-form-urlencoded` and `/register` takes JSON;
+        (4) widening the accepted redirect URIs beyond the Claude callbacks
+        and loopback, which would let a third party phish an authorization
+        code through WHOOP's real consent screen.
+
+    - path: lib/whoop/tokens.ts
+      instructions: >-
+        WHOOP rotates the refresh token on every refresh and invalidates the
+        old one. Flag any path that completes a refresh without persisting the
+        replacement, or that abandons the `refresh_lease_until` row lease that
+        serializes concurrent refreshes — both kill the grant and force the
+        user to reconnect. Refresh policy is deliberately split from storage
+        (`grant-store.ts`) so the lease and rotation stay testable against an
+        in-memory store; keep that seam intact.
+
+    - path: lib/mcp/server.ts
+      instructions: >-
+        A fresh `McpServer` is constructed per request and tools are stateless.
+        Flag anything cached on the instance, or in module scope, that assumes
+        it survives between requests.
+
+    - path: lib/**/*.ts
+      instructions: >-
+        `npm test` is `node --test` running these .ts files directly, with no
+        build step: Node strips types, it does not compile them. In any file
+        reachable from a test, flag relative imports missing the `.ts`
+        extension and TypeScript parameter properties
+        (`constructor(private readonly x: T)`). Both pass `tsc` and bundle
+        fine, then fail at runtime under the test runner.
+
+    - path: app/api/**/route.ts
+      instructions: >-
+        The public paths (`/mcp`, `/token`, `/.well-known/...`) are rewrites
+        declared in next.config.ts, because the discovery documents have to sit
+        at the origin root. Flag a new route handler that needs a public path
+        but has no matching rewrite entry.
+
+    - path: supabase/migrations/*.sql
+      instructions: >-
+        Migrations are numbered and append-only, and run against the live
+        project. Flag edits to an already-applied migration file — the change
+        belongs in a new numbered file — and flag any function, policy or
+        grant that widens access beyond the service role.
+
+    - path: .github/workflows/*.yml
+      instructions: >-
+        CI must keep running with no repository secrets: lib/env.ts reads every
+        variable lazily precisely so `next build` succeeds without production
+        credentials. Flag a step that introduces a required secret or an env
+        block that CI cannot satisfy. Note also that `tsc --noEmit` only works
+        after `next typegen` (or a full build) has generated the route type
+        helpers, so flag a reordering that puts the typecheck first.
