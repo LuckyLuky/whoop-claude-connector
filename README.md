@@ -248,5 +248,6 @@ default.
 - Webhook fan-out. `app/api/webhooks/whoop/route.ts` verifies signatures and
   logs; it doesn't persist anything. Wire it to a cache table if you want a
   warm local copy or a scheduled digest.
-- Wider test coverage. `lib/dates.ts` and `lib/whoop/tokens.ts` have tests
-  (`npm test`); the OAuth bridge routes do not.
+- Wider test coverage. `lib/dates.ts`, `lib/html.ts`, `lib/oauth/store.ts`,
+  `lib/oauth/clients.ts` and `lib/whoop/tokens.ts` have tests (`npm test`); the
+  route handlers themselves do not.

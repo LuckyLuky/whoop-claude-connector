@@ -70,12 +70,18 @@ npm test
 
 `npm test` is `node --test`: Node runs the `.ts` files directly, so there is no
 test framework and no build step. Two consequences for any file reachable from
-a test — `lib/dates.ts`, `lib/whoop/*`:
+a test — `lib/dates.ts`, `lib/html.ts`, `lib/crypto.ts`, `lib/oauth/*`,
+`lib/whoop/*`:
 
 - **Relative imports need the `.ts` extension.** Node resolves ESM literally;
   the bundler is fine either way.
 - **No parameter properties** (`constructor(private readonly x: T)`). Node
   strips types, it does not compile them. Declare the field and assign it.
+
+`lib/oauth/store.ts` takes an optional `SupabaseClient` on the functions that
+consume a single row, so the delete-and-return semantics those rely on can be
+tested against a fake. `takeOne()` is why a failed query never looks like a
+missing row.
 
 `lib/whoop/tokens.ts` splits the refresh *policy* from storage
 (`grant-store.ts`) so the lease and rotation can be tested against an in-memory
