@@ -72,6 +72,33 @@ export function dayRange(date: string, timeZone: string): TimeRange {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
+/**
+ * The local calendar day an instant falls on, as YYYY-MM-DD.
+ *
+ * WHOOP stamps recovery records with a UTC `created_at` and no offset of their
+ * own, so the date has to be derived in the configured timezone — slicing the
+ * UTC prefix puts a late-evening or early-morning record on the wrong day, and
+ * near a window boundary that moves it into the wrong window entirely.
+ *
+ * Undefined for a missing or unparseable instant: better no date than a wrong
+ * one, since an undated record is excluded from windows rather than misplaced.
+ */
+export function localDateIn(
+  instant: string | undefined,
+  timeZone: string,
+): string | undefined {
+  if (!instant) return undefined;
+  const parsed = new Date(instant);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(parsed);
+}
+
 /** Today's date in `timeZone`, as YYYY-MM-DD. */
 export function todayIn(timeZone: string): string {
   return new Intl.DateTimeFormat('en-CA', {
