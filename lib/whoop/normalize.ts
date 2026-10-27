@@ -80,9 +80,10 @@ export interface WhoopWorkout {
     average_heart_rate?: number;
     max_heart_rate?: number;
     kilojoule?: number;
-    distance_meter?: number;
-    altitude_gain_meter?: number;
-    zone_durations?: Record<string, number>;
+    // `null` on sports with no distance (wrestling, BJJ, strength).
+    distance_meter?: number | null;
+    altitude_gain_meter?: number | null;
+    zone_durations?: Record<string, number | null>;
   };
 }
 

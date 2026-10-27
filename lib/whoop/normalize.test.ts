@@ -56,7 +56,7 @@ describe('normalizeRecovery', () => {
  */
 describe('normalizeWorkout', () => {
   it('tolerates null metrics on non-distance sports', () => {
-    const workout = {
+    const workout: WhoopWorkout = {
       id: 'w1',
       start: '2026-10-26T17:00:00.000Z',
       end: '2026-10-26T18:30:00.000Z',
@@ -72,7 +72,7 @@ describe('normalizeWorkout', () => {
         altitude_gain_meter: null,
         zone_durations: { zone_zero_milli: 60_000, zone_four_milli: null },
       },
-    } as unknown as WhoopWorkout;
+    };
 
     const result = normalizeWorkout(workout);
     assert.equal(result.sport, 'wrestling');
