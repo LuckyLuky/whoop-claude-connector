@@ -80,9 +80,10 @@ export interface WhoopWorkout {
     average_heart_rate?: number;
     max_heart_rate?: number;
     kilojoule?: number;
-    distance_meter?: number;
-    altitude_gain_meter?: number;
-    zone_durations?: Record<string, number>;
+    // `null` on sports with no distance (wrestling, BJJ, strength).
+    distance_meter?: number | null;
+    altitude_gain_meter?: number | null;
+    zone_durations?: Record<string, number | null>;
   };
 }
 
@@ -99,14 +100,19 @@ export interface WhoopBodyMeasurement {
   max_heart_rate?: number;
 }
 
-const round = (value: number | undefined, digits = 1): number | undefined =>
-  value === undefined ? undefined : Number(value.toFixed(digits));
+// WHOOP sends `null`, not an absent key, for metrics a record doesn't have
+// (e.g. `distance_meter` on a wrestling or BJJ workout), so every helper
+// guards with `== null` to cover both.
+type Maybe = number | null | undefined;
 
-const minutes = (milli: number | undefined): number | undefined =>
-  milli === undefined ? undefined : Math.round(milli / 60_000);
+const round = (value: Maybe, digits = 1): number | undefined =>
+  value == null ? undefined : Number(value.toFixed(digits));
 
-const kcal = (kilojoule: number | undefined): number | undefined =>
-  kilojoule === undefined ? undefined : Math.round(kilojoule * 0.239006);
+const minutes = (milli: Maybe): number | undefined =>
+  milli == null ? undefined : Math.round(milli / 60_000);
+
+const kcal = (kilojoule: Maybe): number | undefined =>
+  kilojoule == null ? undefined : Math.round(kilojoule * 0.239006);
 
 /** Drops undefined and null keys so tool output stays terse. */
 function compact<T extends Record<string, unknown>>(input: T): Partial<T> {
